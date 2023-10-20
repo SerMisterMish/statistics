@@ -1,0 +1,262 @@
+---
+output: html_document
+error: FALSE
+warning: FALSE
+---
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+## Предварительный анализ данных CARDATA
+
+```{r}
+library(kableExtra)
+library(readr)
+library(ggplot2)
+library(hrbrthemes)
+library(tidyverse)
+library(readxl)
+library(GGally)
+library(psych)
+library(plotly)
+library(nortest)
+library(summarytools)
+
+print_df <- function(df)
+{
+  df |>
+    kable(format = "html") |>
+    kable_styling() |>
+    kableExtra::scroll_box(width = "100%", height = "100%")
+}
+
+create_ggpairs <- function(data, density_diag = TRUE, fig_width = 15, fig_height = 7) {
+  if (density_diag) {
+    ggpairs(data, diag = list(continuous = "densityDiag", discrete = "barDiag", na = "naDiag", mapping = aes(fill = "red")), fig.width = fig_width, fig.height = fig_height)
+  } else {
+    ggpairs(data, diag = list(continuous = "barDiag", mapping = aes(fill = "red")), fig.width = fig_width, fig.height = fig_height)
+  }
+}
+```
+
+## 1. Загрузка данных
+
+```{r}
+data <- read_xls("C:/Users/arina/Desktop/R/CARDATA.xls", na = "NA")
+
+head(data, 5) |>
+ print_df()
+```
+
+## 2. Описание признаков
+
+1. ***mpg*** - мили на галлон(расход топлива) - **количественный дискретный признак**
+2. ***cylinder*** - количество цилиндров(от 4 до 8) - **порядковый признак**
+3. ***displace*** - это объем всех цилиндров внутреннего сгорания двигателя автомобиля в кубических дюймах - **количественный дискретный признак**
+4. ***horsepow*** - лошадиные силы - **количественный дискретный признак**
+5. ***weight*** - вес автомобиля - **количественный дискретный признак**
+6. ***accel*** - (время разгона с 0 до 60 миль в час - **количественный непрерывный признак**
+7. ***year*** - год выпуска модели - **порядковый признак**
+8. ***origin*** - страна производства (1. American, 2. European, 3. Japanese) - **качественный признак**
+9. ***make*** - марка автомобиля - **качественный признак**
+10. ***model*** - название модели - **качественный признак**
+11. ***price*** - цена - **количественный дискретный признак**
+
+```{r}
+str(data)
+```
+
+## 3. Matrix plot 
+
+
+```{r}
+data_select <- data %>% select(-ROW, -MAKE, -MODEL, -ORIGIN, -CYLINDER, -YEAR)
+
+create_ggpairs(data_select, density_diag = TRUE)  # графики плотности на диагонали
+
+create_ggpairs(data_select, density_diag = FALSE)  # гистограммы на диагонали
+```
+
+## 4. Поиск outliers
+
+**Под подозрение попали следующие точки данных:**
+
+Две самые дорогие машины:
+```{r}
+data_high_price <- data %>% filter(PRICE > 12000)
+print_df(data_high_price)
+
+```
+
+Это оказались Мерседесы, выведем их все:
+```{r}
+data_MERC <- data %>% filter(PRICE > 12000)
+print_df(data_MERC)
+```
+Их оказалось всего 2. Можно сделать вывод, что такая ценовая политика --- это особенность торговой марки, так как по характеристикам ничего особенного у этих 2 машин нет.
+
+
+Еще нексолько выделяющихся точек:
+```{r}
+data_HORSE <- data %>% filter(HORSEPOW > 150)
+print_df(data_HORSE)
+```
+
+
+```{r}
+data_MPG <- data %>% filter(MPG > 35 & DISPLACE > 250)
+print_df(data_MPG)
+```
+
+
+```{r}
+data_HP <- data %>% filter(MPG > 30 & HORSEPOW > 125)
+print_df(data_HP)
+```
+Кажется, это просто особенности данных машин.
+
+
+
+## Уберем их из рассмотрения и построим новые matrix plot.
+
+```{r}
+data_new <- data_select %>%
+  filter(PRICE < 12000,
+         (HORSEPOW < 165 | is.na(HORSEPOW)),
+         DISPLACE != min(DISPLACE),
+         !(MPG > 35 & DISPLACE > 250),
+         !(MPG > 30 & HORSEPOW > 125) | is.na(HORSEPOW))
+
+create_ggpairs(data_new, density_diag = TRUE)  
+create_ggpairs(data_new, density_diag = FALSE)
+```
+
+
+## 5. Поиск неоднородностей
+Мы решили, что в некоторых данных прослеживаются неоднородности: два облака точек видно в графиках DISPLACE vs MPG и HORSEPOW vs DISPLACE. Рассмтрим их подробнее:
+
+# DISPLACE vs MPG. Раскрасим точки в зависимости от страны проивзодства:
+```{r}
+data$ORIGIN <- factor(data$ORIGIN, labels = c("American", "European", "Japanese"))
+
+
+plot_ly(data, x = ~DISPLACE, y = ~MPG, color = ~ORIGIN, 
+        text = ~paste("origin: ", ORIGIN)) %>%
+  add_markers(size = 6, color = ~ORIGIN) %>%
+  layout(title = "MPG vs DISPLACE",
+         xaxis = list(title = "MPG", range = c(50, 380)),  
+         yaxis = list(title = "DISPLACE", range = c(10, 50)),  
+         showlegend = TRUE)
+
+```
+
+# DISPLACE vs MPG. Раскрасим точки в зависимоти от количества цилиндров:
+```{r}
+data$CYLINDER <- factor(data$CYLINDER)
+
+plot_ly(data, x = ~DISPLACE, y = ~MPG, color = ~CYLINDER, 
+        text = ~paste("CYLINDER: ", CYLINDER)) %>%
+  add_markers(size = 6, color = ~CYLINDER) %>%
+  layout(title = "MPG vs DISPLACE",
+         xaxis = list(title = "MPG", range = c(50, 380)),  
+         yaxis = list(title = "DISPLACE", range = c(10, 50)),  
+         showlegend = TRUE)
+```
+
+
+
+# HORSEPOW vs DISPLACE. Раскрасим точки в зависимости от страны проивзодства:
+```{r}
+plot_ly(data, x = ~HORSEPOW, y = ~DISPLACE, color = ~ORIGIN, 
+        text = ~paste("origin: ", ORIGIN)) %>%
+  add_markers(size = 6, color = ~ORIGIN) %>%
+  layout(title = "HORSEPOWER vs DISPLACE",
+         xaxis = list(title = "HORSEPOWER"),
+         yaxis = list(title = "DISPLACE"),
+         showlegend = TRUE)
+
+```
+
+
+# HORSEPOW vs DISPLACE. Раскрасим точки в зависимости от количества цилиндров:
+```{r}
+plot_ly(data, x = ~HORSEPOW, y = ~DISPLACE, color = ~CYLINDER, 
+        text = ~paste("origin: ", CYLINDER)) %>%
+  add_markers(size = 6, color = ~CYLINDER) %>%
+  layout(title = "HORSEPOWER vs DISPLACE",
+         xaxis = list(title = "HORSEPOWER"),
+         yaxis = list(title = "DISPLACE"),
+         showlegend = TRUE)
+```
+
+
+
+## 6. Проверка симметричности 
+
+Так как были сильно несимметричные (с хвостом вправо) распределения на положительной полуоси, то мы прологарифмировали их и снова построили pairs plot - зависимости должны стать более линейными, а распределения более симметричными.
+
+```{r}
+data_log <- data_new %>% 
+  mutate_at(vars(DISPLACE, HORSEPOW, ACCEL, WEIGHT, PRICE), ~log(.))
+
+create_ggpairs(data_log, density_diag = TRUE)  
+create_ggpairs(data_log, density_diag = FALSE)
+```
+Унимодальным и симметричным является только распределение параметра ACCEL
+
+## 7. Описательные статистики 
+
+```{r}
+data_select1 <- data %>% select(-ROW, -MAKE, -MODEL, -ORIGIN, -CYLINDER, -YEAR)
+data_select2 <- data %>% select(MAKE, MODEL, ORIGIN, CYLINDER, YEAR)
+
+
+desc1<-describe(data_select1)
+print_df(desc1)
+
+#desc2<- dfSummary(data_select2)
+
+desc2<-dfSummary(data_select2, 
+          plain.ascii  = FALSE, 
+          style        = "grid", 
+          graph.magnif = 0.75, 
+          valid.col    = FALSE,
+          tmp.img.dir  = "/tmp")
+desc2 <- desc2 %>% select(-Graph)
+
+
+print_df(desc2)
+```
+
+## 8. Проверка на нормальность
+
+```{r}
+plot_pp_graph <- function(data, column_name) {
+  data<-data
+  expected_quantiles <- qnorm(ppoints(length(data)))
+  qqnorm(data,  pch = 19, col = "deeppink")
+  qqline(data, distribution = qnorm, lwd = 2, col = "limegreen")
+  legend("topleft", legend = column_name, col = "deeppink", pch = 19)
+}
+
+
+par(mfrow = c(2, 3))
+
+plot_pp_graph(data_log$PRICE, "PRICE")
+plot_pp_graph(data_log$MPG, "MPG")
+plot_pp_graph(data_log$HORSEPOW, "HORSEPOW")
+plot_pp_graph(data_log$DISPLACE, "DISPLACE")
+plot_pp_graph(data_log$WEIGHT, "WEIGHT")
+plot_pp_graph(data_log$ACCEL, "ACCEL")
+
+```
+
+Проведем тесты для проверки нормальности PRICE
+
+```{r}
+lillie.test(data_log$PRICE)
+ad.test(data_log$PRICE)
+shapiro.test(data_log$PRICE)
+```
+
+Если считать, что мы проверяем гипотезу о нормальности распределения с уровнем значимости а=0.05, то тесты показывают, что мы не отвергаем гипотезу о нормальности распределления log_PRICE и можем считать, что оно близко к нормальному. 
