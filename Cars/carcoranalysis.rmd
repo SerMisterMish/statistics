@@ -1,0 +1,162 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+library(ggplot2)
+library(dplyr)
+library(GGally)
+library(scatterPlotMatrix)
+library(corrplot)
+library(ppcor)
+
+# library(kableExtra)
+# print_df <- function(df)
+# {
+#   df |>
+#     kable(format = "html") |>
+#     kable_styling() |>
+#     kableExtra::scroll_box(width = "100%", height = "100%")
+# }
+
+# create_ggpairs <- function(data, density_diag = TRUE, fig_width = 15, fig_height = 7) {
+#   if (density_diag) {
+#     ggpairs(data, diag = list(continuous = "densityDiag", discrete = "barDiag", na = "naDiag", mapping = aes(fill = "red")), fig.width = fig_width, fig.height = fig_height)
+#   } else {
+#     ggpairs(data, diag = list(continuous = "barDiag", mapping = aes(fill = "red")), fig.width = fig_width, fig.height = fig_height)
+#   }
+# }
+
+getmode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+```
+
+## 1. Загрузка данных
+```{r}
+df <- read.csv("CARDATA.csv", sep = ";")
+
+df |> head(5)
+```
+
+## 2. Описание признаков
+
+1. ***mpg*** - мили на галлон(расход топлива) - **количественный непрерывный признак**
+2. ***cylinder*** - количество цилиндров(от 3 до 8) - **дискретный признак**
+3. ***displace*** - это объем всех цилиндров внутреннего сгорания двигателя автомобиля в кубических дюймах - **количественный непрерывный признак**
+4. ***horsepow*** - лошадиные силы - **количественный непрерывный признак**
+5. ***weight*** - вес автомобиля - **количественный непрерывный признак**
+6. ***accel*** - (время разгона с 0 до 60 миль в час - **количественный дискретный признак**
+7. ***year*** - год выпуска модели - **количественный дискретный признак**
+8. ***origin*** - страна производства (1. American, 2. European, 3. Japanese) - **качественный признак**
+9. ***make*** - марка автомобиля - **качественный признак**
+10. ***model*** - название модели - **качественный признак**
+11. ***price*** - цена - **количественный непрерывный признак**
+
+## 3. Графики зависимостей признаков
+```{r}
+categories <- list(NULL, c(3, 4, 5, 6, 8), NULL, NULL, NULL, 78:82, NULL, NULL)
+df |>
+  dplyr::select(-ROW, -MAKE, -MODEL, -ORIGIN) |>
+  scatterPlotMatrix(regressionType = 1, corrPlotType = "Text", categorical = categories, plotProperties = list(noCatColor = "Indigo"), controlWidgets = TRUE, height = 1050, width = 1000)
+```
+
+Некоторые машины имеют ***mpg*** $= 0$ или ***horsepower*** $ = 0$.
+Такого быть не может, поэтому мы их удалим и построим новые графики.
+
+```{r}
+df.clean <- df |> filter(HORSEPOW != 0 & MPG != 0)
+df.clean |>
+  dplyr::select(-ROW, -MAKE, -MODEL, -ORIGIN) |>
+  scatterPlotMatrix(regressionType = 1, corrPlotType = "Text", categorical = categories, plotProperties = list(noCatColor = "Indigo"), controlWidgets = TRUE, height = 1050, width = 1000)
+```
+
+# 4. Удаление выбросов
+```{r}
+df.clean <- df.clean |> filter(ROW != 145 & ROW != 90 & ROW != 85 & ROW != 54)
+df.clean |>
+  dplyr::select(-ROW, -MAKE, -MODEL, -ORIGIN) |>
+  scatterPlotMatrix(regressionType = 1, corrPlotType = "Text", categorical = categories, plotProperties = list(noCatColor = "Indigo"), controlWidgets = TRUE, height = 1050, width = 1000)
+```
+
+# 5. Логарифмируем признаки с "хвостами"
+```{r}
+df.log <- df.clean |> mutate(DISPLACE = log(DISPLACE), HORSEPOW = log(HORSEPOW), WEIGHT = log(WEIGHT), PRICE = log(PRICE))
+df.log |>
+  dplyr::select(-ROW, -MAKE, -MODEL, -ORIGIN) |>
+  scatterPlotMatrix(regressionType = 1, corrPlotType = "Text", categorical = categories, plotProperties = list(noCatColor = "Indigo"), controlWidgets = TRUE, height = 1050, width = 1000)
+```
+
+# 6. Коэффициенты Спирмена
+
+### До удаления выбросов
+```{r}
+df |>
+  filter(!is.na(MPG) &
+           !is.na(DISPLACE) &
+           !is.na(HORSEPOW) &
+           !is.na(WEIGHT) &
+           !is.na(PRICE) &
+           !is.na(ACCEL)) |>
+  dplyr::select(MPG, DISPLACE, HORSEPOW, ACCEL, WEIGHT, PRICE) |>
+  cor(method = "spearman") |>
+  corrplot(method = "number", tl.col = "black", tl.srt = 60)
+```
+
+### После удаления выбросов
+```{r}
+df.clean |>
+  filter(!is.na(MPG) &
+           !is.na(DISPLACE) &
+           !is.na(HORSEPOW) &
+           !is.na(WEIGHT) &
+           !is.na(PRICE) &
+           !is.na(ACCEL)) |>
+  dplyr::select(MPG, DISPLACE, HORSEPOW, ACCEL, WEIGHT, PRICE) |>
+  cor(method = "spearman") |>
+  corrplot(method = "number", tl.col = "black", tl.srt = 60)
+```
+
+### После логарифмирования
+```{r}
+df.log |>
+  filter(!is.na(MPG) &
+           !is.na(DISPLACE) &
+           !is.na(HORSEPOW) &
+           !is.na(WEIGHT) &
+           !is.na(PRICE) &
+           !is.na(ACCEL)) |>
+  dplyr::select(MPG, DISPLACE, HORSEPOW, ACCEL, WEIGHT, PRICE) |>
+  cor(method = "spearman") |>
+  corrplot(method = "number", tl.col = "black", tl.srt = 60)
+```
+
+# 7. Частичные коэффициенты корреляции
+```{r}
+partial.correlation <- function(...) {
+  df.log |>
+    filter(!is.na(MPG) &
+             !is.na(DISPLACE) &
+             !is.na(WEIGHT) &
+             !is.na(ACCEL) &
+             !is.na(HORSEPOW) &
+             !is.na(PRICE) &
+             !is.na(ORIGIN) &
+             !is.na(MAKE) &
+             !is.na(CYLINDER) &
+             !is.na(YEAR)) |>
+    dplyr::select(-MODEL, -ROW) |>
+    group_by(...) |>
+    mutate(horsepow.shifted = HORSEPOW - mean(HORSEPOW), price.shifted = PRICE - mean(PRICE), mpg.shifted = MPG - mean(MPG), displace.shifted = DISPLACE - mean(DISPLACE), weight.shifted = WEIGHT - mean(WEIGHT), accel.shifted = ACCEL - mean(ACCEL)) |>
+    group_by(.drop = TRUE) |>
+    dplyr::select(mpg.shifted, displace.shifted, horsepow.shifted, accel.shifted, weight.shifted, price.shifted) |>
+    cor() |>
+    corrplot(method = "number", tl.col = "black", tl.srt = 60)
+}
+
+partial.correlation(YEAR, MAKE)
+```
