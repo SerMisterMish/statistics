@@ -1,0 +1,143 @@
+---
+title: "Activities"
+author: "Потешкин Егор, Подлеснов Яков"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(dplyr)
+library(scatterPlotMatrix)
+library(ggplot2)
+library(tidyr)
+library(GGally)
+library(car)
+library(kableExtra)
+
+
+my_fn <- function(data, mapping, ...){
+  p <- ggplot(data = data, mapping = mapping) + 
+    geom_point() + 
+    geom_smooth(method=loess, fill="red", color="red", ...) +
+    geom_smooth(method=lm, fill="blue", color="blue", ...)
+  p
+}
+
+getmode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+```
+
+## 1. Загрузка данных
+```{r, message=FALSE}
+df <- read_xls(path = './data/Activities.xls')
+colnames(df)[1] <- "GR.NAME"
+head(df, 5)
+```
+## 2. Описание признаков
+1. ***GR.NAME*** --- группа людей, ***качественный признак***. 
+2. ***WORK*** --- количество часов, потраченных группой на работу, **количественный дискретный признак**.
+3. ***TRANSPORT*** --- количество часов, потраченных группой, находясь в транспортном средстве, **количественный дискретный признак**.
+4. ***HOUSEHOLD*** --- количество часов, потраченных группой на работу по дому, **количественный дискретный признак**.
+5. ***CHILDREN*** --- количество часов, потраченных группой на детей, **количественный дискретный признак**.
+6. ***SHOPPING*** --- количество часов, потраченных группой на шоппинг, **количественный дискретный признак**
+7. ***PERSONAL CARE*** --- количество часов, потраченных группой на уход за собой, **количественный дискретный признак**.
+8. ***MEAL*** --- количество часов, потраченных группой на приготовление (потребление?) пищи, **количественный дискретный признак**.
+9. ***TV*** --- количество часов, потраченных группой на просмотр телевизора, **количественный дискретный признак**.
+10. ***LEISURE*** --- количество часов потраченных на досуг, **количественный дискретный признак**.
+11. ***GENDER*** --- гендер группы (мужчина/женщина), **качественный признак**.
+12. ***GEO.REGION*** --- регион проживания группы (запад/восток), **качественный признак**.
+
+Стало интересно, сколько в каждой категории (пол/географическое положение) групп людей.
+```{r}
+count(df, GENDER)
+count(df, GEO.REGION)
+```
+## 3. Графики зависимостей признаков
+```{r}
+categorical <- list(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, c("MALE", "FEMALE"), c("EAST", "WEST"))
+df |>
+  select(-GR.NAME) |>
+  scatterPlotMatrix(regressionType = 1,
+                    categorical = categorical,
+                    corrPlotType = "Text",
+                    plotProperties = list(noCatColor = "Indigo"),
+                    controlWidgets = TRUE,
+                    height = 1050,
+                    width = 1000)
+```
+
+Видно, что чем больше человек работает, тем менее он делает работы по дому и тем менее заботится о своих детях, что логично. Также заметим, что работают много, в основном мужчины, а женщины тратят свое время на дом и детей. Из неочевидного, кто тратит много времени на еду, тот тратит много времени на сон.
+
+Заметна однородность данных для людей из разных регионов.
+
+
+
+## 3. Summary и box-plot'ы
+```{r}
+summary(df |> select(-GR.NAME, -GENDER, -GEO.REGION))
+```
+
+```{r}
+df1 <- df |>
+  pivot_longer(cols = c(WORK, TRANSPORT, HOUSEHOLD,
+                        CHILDREN, SHOPPING, `PERSONAL CARE`,
+                        MEAL, SLEEP,TV, LEISURE),
+               names_to = "Var",
+               values_to = "Val")
+```
+
+```{r}
+ggplot(data = df1, aes(x=Var,y=Val,fill=GENDER)) + geom_boxplot() + scale_x_discrete(guide = guide_axis(angle = 90)) + theme(axis.text.x=element_text(size=4))
+ggplot(data = df1, aes(x=Var,y=Val,fill=GEO.REGION)) + geom_boxplot() + scale_x_discrete(guide = guide_axis(angle = 90)) + theme(axis.text.x=element_text(size=4))
+```
+На втором box-plot'е видны аномально маленькие значения по признаку WORK, посмотрим на них.
+```{r}
+df |> arrange(WORK) |> head(5)
+```
+Судя по всему, эти индивиды просто сидят дома и не работают, значение HOUSEHOLD тому подтверждение. Скорее всего, это группы женщин-домохозяек, возможно, преклонного возраста.
+
+## 4. t-tests
+Обычно, когда люди готовят, они смотрят телевизор. Проверим такую гипотезу: в среднем люди смотрят телевизора столько же, сколько и готовят.
+```{r}
+t.test(df$TV, df$MEAL, paired = TRUE)
+```
+Попробуем рассмотреть отдельно мужчин и женщин.
+```{r}
+df.male <- df |> filter(GENDER == 'MALE')
+df.female <- df |> filter(GENDER == 'FEMALE')
+```
+
+```{r}
+t.test(df.male$TV, df.male$MEAL, paired = TRUE)
+t.test(df.female$TV, df.female$MEAL, paired = TRUE)
+```
+Получили, что для мужчин нет оснований считать, что матожидания не равны, в отличие от женщин.
+
+Теперь посмотрим, одинаково ли в среднем тратят на досуг мужчины и женщины, но для начала проверим, равны ли дисперсии. 
+```{r, warning=FALSE}
+leveneTest(LEISURE ~ GENDER, data = df, center = mean)
+```
+P-value достаточно большое, чтобы не отвергать нулевую гипотезу. 
+```{r}
+t.test(LEISURE ~ GENDER, data = df, var.equal = TRUE)
+```
+Для уровня значимости $\alpha\in(0,\text{p-value})$ нулевая гипотеза не отвергается.
+
+Далее, если посмотреть на ящики с усами для разных регионов, то можно заметить, что на западе больший разброс по времени на работе, чем на востоке. Проверим равенство матожиданий. Поскольку у групп с запада есть индивидумы с очень маленьким временем работы (скорее всего, просто безработные), при проверке равенства дисперсий вместо среднего возьмем медиану. Получим более робастный, но менее мощный тест.
+```{r, warning=FALSE}
+leveneTest(WORK ~ GEO.REGION, data = df, center = median)
+```
+
+```{r}
+t.test(WORK ~ GEO.REGION, data = df, var.equal = TRUE)
+```
+
+Предположим, что телевидение каким-то образом (например, с помощью рекламы) влияет на отношение людей к своему здоровью/красоте, и поэтому в среднем они заботятся о себе столько же, сколько смотрят телевор.
+```{r}
+t.test(df$`PERSONAL CARE`, df$TV, paired = TRUE)
+```
+
