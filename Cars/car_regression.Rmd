@@ -1,0 +1,325 @@
+---
+output: html_document
+error: FALSE
+warning: FALSE
+---
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+
+## Анализ данных CARDATA
+
+```{r}
+library(kableExtra)
+library(readr)
+library(ggplot2)
+library(hrbrthemes)
+library(tidyverse)
+library(readxl)
+library(GGally)
+library(psych)
+library(plotly)
+library(nortest)
+library(scatterPlotMatrix)
+library(summarytools)
+library(caret)
+library(car)
+library(olsrr)
+library(stats)
+
+print_df <- function(df)
+{
+  df |>
+    kable(format = "html") |>
+    kable_styling() |>
+    kableExtra::scroll_box(width = "100%", height = "100%")
+}
+
+create_ggpairs <- function(data, density_diag = TRUE, fig_width = 15, fig_height = 7) {
+  if (density_diag) {
+    ggpairs(data, diag = list(continuous = "densityDiag", discrete = "barDiag", na = "naDiag", mapping = aes(fill = "red")), fig.width = fig_width, fig.height = fig_height)
+  } else {
+    ggpairs(data, diag = list(continuous = "barDiag", mapping = aes(fill = "red")), fig.width = fig_width, fig.height = fig_height)
+  }
+}
+```
+
+## 1. Загрузка данных
+
+```{r}
+data <- read_xls("C:/Users/redmi/Documents/R analysis/CARDATA.xls", na = "NA")
+
+names(data) <- tolower(names(data))
+
+head(data, 5) |>
+ print_df()
+```
+
+## 2. Описание признаков
+
+1. ***mpg*** - мили на галлон(расход топлива) 
+2. ***cylinder*** - количество цилиндров(от 4 до 8) 
+3. ***displace*** - это объем всех цилиндров внутреннего сгорания двигателя автомобиля в кубических дюймах 
+4. ***horsepow*** - лошадиные силы 
+5. ***weight*** - вес автомобиля 
+6. ***accel*** - (время разгона с 0 до 60 миль в час 
+7. ***year*** - год выпуска модели 
+8. ***origin*** - страна производства (1. American, 2. European, 3. Japanese) 
+9. ***make*** - марка автомобиля 
+10. ***model*** - название модели 
+11. ***price*** - цена `
+
+## 3. Matrix plot 
+
+
+```{r fig.width=17, fig.height=10}
+data_select <- data %>% select(-row, -make, -model)
+
+create_ggpairs(data_select, density_diag = TRUE)  # графики плотности на диагонали
+
+create_ggpairs(data_select, density_diag = FALSE)  # гистограммы на диагонали
+
+categories <- list(NULL, c(3, 4, 5, 6, 8), NULL, NULL, NULL, 78:82, NULL, NULL)
+
+data |>
+  dplyr::select(-row, -make, -model) |>
+  scatterPlotMatrix(regressionType = 1, corrPlotType = "Text", categorical = categories, plotProperties = list(noCatColor = "Indigo"), controlWidgets = TRUE, height = 1050, width = 1000)
+```
+
+# 4. Логарифмируем признаки с "хвостами"
+```{r}
+data_log <- data |> mutate(displace = log(displace), horsepow = log(horsepow), weight = log(weight), accel = log(accel), price = log(price))
+
+data_log |>
+  dplyr::select(-row, -make, -model) |>
+  scatterPlotMatrix(regressionType = 1, corrPlotType = "Text", categorical = categories, plotProperties = list(noCatColor = "Indigo"), controlWidgets = TRUE, height = 1050, width = 1000)
+```
+
+# 5. Модель регрессии 
+
+```{r}
+data_log <- data_log %>% select(-row, -make, -model) 
+data_log_na <- na.omit(data_log)
+
+
+model <- lm(price ~ mpg + cylinder + displace + horsepow + weight + accel + year + origin, data = data_log_na)
+
+summary(model)
+
+```
+
+
+```{r}
+cor_matrix <- cor(data_log_na)
+cor_df <- as.data.frame(as.table(cor_matrix))
+names(cor_df) <- c("Var1", "Var2", "value")
+
+heatmap <- ggplot(data = cor_df, aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_distiller(palette = "RdPu", limits = c(-1, 1), breaks = seq(-1, 1, by = 0.2),
+                       name = "Correlation") +
+  labs(title = "Correlation Heatmap", x = "", y = "") + 
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+heatmap + 
+  geom_text(aes(label = round(value, 2)), size = 3, color = "black")
+```
+
+
+```{r}
+independent_vars <- data_log_na[, -ncol(data_log_na)]
+cor_matrix_independent <- cor(independent_vars)
+
+dependent_var <- data_log_na[, ncol(data_log_na)]
+cor_with_dependent <- sapply(independent_vars, function(x) cor(x, dependent_var))
+
+redundancy_table <- data.frame(
+  Feature = names(cor_with_dependent),
+  CorrelationWithTarget = cor_with_dependent,
+  MaxCorrelationWithOtherFeatures = apply(cor_matrix_independent, 2, function(x) {
+    max(abs(x[x != 1]))
+  })
+)
+
+print_df(redundancy_table)
+
+```
+
+
+```{r}
+reduced_model <- step(model, direction="backward")
+
+summary(reduced_model)
+```
+
+```{r}
+predicted <- predict(reduced_model)
+residuals <- residuals(reduced_model)
+
+threshold <- 0.8 
+suspicious_points <- which(abs(residuals) > threshold)
+
+plot(predicted, residuals, 
+     xlab = "Predicted Values", 
+     ylab = "Residuals",
+     main = "Predicted vs Residuals",
+     pch = 16, col = "darkblue",  
+     cex.lab = 1.2, cex.axis = 1.2)  
+abline(h = 0, lty = 2, col = "red")  
+grid(col = "gray", lty = "dotted")  
+
+points(predicted[suspicious_points], residuals[suspicious_points],
+       pch = 19, col = "red")
+
+text(predicted[suspicious_points], residuals[suspicious_points], 
+     labels = suspicious_points, pos = 1, col = "red")
+
+
+```
+
+Этот график представляет собой диаграмму остатков модели линейной регрессии относительно предсказанных значений. Он используется для анализа качества модели и выявления потенциальных проблем. Вот как можно интерпретировать различные аспекты этого графика:
+
+#### Горизонтальная линия на уровне 0
+
+1. Горизонтальная красная пунктирная линия на уровне 0 представляет идеальные остатки. В идеале, точки (остатки) должны равномерно распределяться вокруг этой линии, не показывая никакой систематической тенденции в отклонениях от модели.
+
+
+#### Точки на графике
+
+1. Темно-синие точки показывают остатки (разницу между фактическими и предсказанными значениями) для каждого наблюдения в датасете.
+
+2. Чем ближе точка к горизонтальной линии, тем меньше ошибка предсказания для данного наблюдения.
+
+3. Распределение точек вокруг горизонтальной линии дает представление об однородности дисперсии остатков (гомоскедастичности) и о наличии или отсутствии систематических ошибок.
+
+
+
+```{r}
+squared_residuals <- residuals^2
+
+plot(predicted, squared_residuals, 
+     xlab = "Predicted Values", 
+     ylab = "Squared Residuals",
+     main = "Predicted vs Squared Residuals",
+     pch = 16, col = "darkblue",  
+     cex.lab = 1.2, cex.axis = 1.2)  
+abline(h = 0, lty = 2, col = "red")  
+grid(col = "gray", lty = "dotted")  
+
+```
+
+График "Predicted vs Squared Residuals" (Предсказанные значения против квадратов остатков) аналогичен графику остатков, но вместо самих остатков используются их квадраты. 
+
+1. Гомоскедастичность: Если точки равномерно распределены вокруг горизонтальной оси на разных уровнях предсказанных значений без явного увеличения или уменьшения разброса, это свидетельствует о гомоскедастичности остатков.
+
+2. Гетероскедастичность: Если разброс (дисперсия) квадратов остатков увеличивается или уменьшается с ростом предсказанных значений, это указывает на гетероскедастичность. Гетероскедастичность может быть представлена в виде воронкообразного расширения или сужения облака точек вдоль оси предсказанных значений.
+
+```{r}
+qqnorm(residuals, 
+       main = "QQ Plot of Residuals", 
+       xlab = "Theoretical Quantiles", 
+       ylab = "Sample Quantiles", 
+       col = "darkblue")  
+
+qqline(residuals, col = "red")
+```
+
+QQ-график остатков используется для визуальной оценки того, насколько хорошо распределение остатков соответствует нормальному распределению. 
+
+Отклонения в начале или в конце кривой: Если точки отклоняются от красной линии на концах (в начале или в конце графика), это может указывать на наличие тяжелых хвостов в распределении остатков, т.е., наличие выбросов или нарушение нормальности.
+
+
+
+```{r}
+plot(reduced_model, which=3, col=c("darkblue"))
+```
+
+Ось Y Показывает квадратный корень из стандартизированных остатков. Использование квадратного корня помогает уменьшить влияние выбросов и делает тенденции более заметными.
+
+1. Гомоскедастичность: Если дисперсия остатков константна, точки на графике будут равномерно распределены вдоль горизонтальной оси без явных тенденций. Это идеальная ситуация, указывающая на то, что предположение о постоянстве дисперсии выполняется.
+    
+2. Гетероскедастичность: Если точки формируют какой-либо узнаваемый паттерн (например, воронкообразное расширение или сужение), это может указывать на проблему гетероскедастичности, когда дисперсия остатков изменяется в зависимости от уровня предсказанных значений. 
+
+## Выбросы по Куку
+
+
+```{r}
+cooks_distance <- cooks.distance(reduced_model)
+
+plot(cooks_distance, 
+     col = "darkblue",
+     type = "h", 
+     main = "Cook's Distance",
+     xlab = "Observation",
+     ylab = "Cook's Distance")
+
+abline(h = 1/length(cooks_distance), col = "red", lty = 2)
+```
+
+## Выбросы по Махаланобису
+
+
+```{r}
+
+residuals <- residuals(reduced_model)
+residuals_matrix <- as.matrix(residuals)
+cov_matrix <- cov(residuals_matrix)
+
+mahalanobis_distance <- mahalanobis(residuals_matrix, center = colMeans(residuals_matrix), cov = cov_matrix)
+
+df <- length(coef(reduced_model))
+alpha <- 0.05
+mahalanobis_threshold <- qchisq(1 - alpha, df)
+
+plot(mahalanobis_distance, 
+     main = "Mahalanobis Distance Plot",
+     xlab = "Observation",
+     ylab = "Mahalanobis Distance",
+     type = "h", 
+     col = "darkblue") 
+
+abline(h = mahalanobis_threshold, col = "red", lty = 2)
+
+```
+
+
+```{r}
+ols_plot_resid_lev(reduced_model)
+```
+
+Оси графика
+1. Ось X ("Leverage"): Показывает значение плеча влияния для каждого наблюдения. Плечо влияния отражает потенциальное влияние каждого наблюдения на оценки параметров модели. Высокие значения плеча влияния указывают на то, что наблюдение имеет большое влияние на конфигурацию модели.
+
+2.  Ось Y ("RStudent"): Показывает стьюдентизированные остатки (остатки, делённые на оценку их стандартного отклонения, учитывая число степеней свободы). Стьюдентизированные остатки используются для определения выбросов в данных.
+
+
+
+```{r}
+
+ols_plot_resid_stud_fit(reduced_model)
+
+```
+
+Этот график показывает удаленные стьюдентизированные остатки по сравнению с предсказанными значениями. Удаленные стьюдентизированные остатки — это остатки, рассчитанные без учета влияния самого наблюдения, что позволяет более точно оценить его влияние.
+
+
+## Выбросы
+
+```{r}
+selected_rows <- data_log_na[c(54, 55, 85, 88), ]
+print_df(selected_rows)
+```
+```{r}
+result <- subset(data, mpg == 25 & cylinder == 5 & year == 79 & origin == 2 |
+                          mpg == 23 & cylinder == 8 & year == 79 & origin == 1 |
+                          mpg == 30 & cylinder == 4 & year == 80 & origin == 2)
+
+print_df(result)
+
+```
+
+
+
+
