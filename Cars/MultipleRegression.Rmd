@@ -1,0 +1,241 @@
+---
+title: "Multiple Regression"
+output: html_notebook
+---
+
+# Анализ продолжительности жизни
+
+## Загрузка данных
+
+```{r}
+library(readxl)
+library(dplyr)
+library(kableExtra)
+library(scatterPlotMatrix)
+library(corrplot)
+library(ellipse)
+library(lm.beta)
+library(olsrr)
+
+print_df <- function(df)
+{
+  df |>
+    kable(format = "html") |>
+    kable_styling() |>
+    kableExtra::scroll_box(width = "100%", height = "100%")
+}
+
+televisions <- read.table("televisions.dat")
+names(televisions) <- c("Countries", "LifeExp", "Television", "Physician", "LifeFemale", "LifeMale")
+televisions <- televisions |> mutate(LifeExp = as.numeric(LifeExp), Television = as.numeric(Television))
+```
+
+## Смотрим данные
+
+```{r}
+televisions |> head(5) |> print_df()
+```
+
+- **Countries** --- страна, качественный признак;
+
+- **LifeExp** --- продолжительность жизни, количественный непрерывный признак;
+
+- **Television** --- количество людей на один телевизор, количественный непрерывный признак;
+
+- **Physician** --- количество людей на одного врача, количественный непрерывный признак;
+
+- **LifeFemale** --- продолжительность жизни женщин, количественный непрерывный признак;
+
+- **LifeMale** --- продолжительность жизни мужчин, количественный непрерывный признак;
+
+
+
+```{r}
+scatterPlotMatrix(televisions)
+```
+
+```{r}
+televisions <- televisions |> dplyr::mutate(Television = log(Television), Physician = log(Physician))
+```
+
+```{r}
+scatterPlotMatrix(televisions)
+```
+
+## Корреляция признаков
+
+```{r}
+pairwise.cor <- function(data, name_method = "pearson"){
+  m <- cor(data)
+  m.p.value <- cor(data)
+  
+  for (i in colnames(data)){
+    for (j in colnames(data)){
+      data.out <- data|> filter(!is.na(data[[i]]) & !is.na(data[[j]]))
+      m[i, j] <- cor(x = data.out[[i]], y = data.out[[j]], method = name_method)
+      m.p.value[i, j] <- cor.test(x = as.vector(data.out[[i]]), y = as.vector(data.out[[j]]), method = name_method)$p.value
+    }
+  }
+  
+  corrplot(m, method = "number")
+  as.data.frame(m.p.value)
+}
+
+televisions <- televisions |> filter(!is.na(Television))
+televisions |> select(-Countries) |> pairwise.cor() |> print_df()
+```
+
+## Убираем сильнокоррелирующие
+
+```{r}
+televisions <- televisions |> select(-LifeFemale, -LifeMale)
+```
+
+## Многомерная регрессия
+
+```{r}
+model.televisions <- lm(LifeExp ~ Television + Physician, televisions)
+model.televisions.beta <- lm.beta(model.televisions)
+summary(model.televisions.beta)
+```
+
+- Коэффициент регрессии количества людей на телевизор отрицателен, возможно, потому что чем больше людей на один телевизор, тем хуже уровень жизни, значит, меньше живут люди.
+
+- Аналогична ситуация с врачами.
+
+## Корреляция оценок коэффициентов регресии
+
+```{r}
+n.televisions <- length(televisions$Countries)
+sigma.televisions <- sum((televisions$LifeExp - (model.televisions$coefficients[1] + model.televisions$coefficients[2] * televisions$Television + model.televisions$coefficients[3] * televisions$Physician)) ** 2) / (n.televisions - 3)
+corMatrix.televisions <- televisions |> select(-Countries, -LifeExp) |> cov()
+cov_b.televisions <- sigma.televisions / n.televisions * solve(corMatrix.televisions)
+cor_b.televisions <- cov2cor(cov_b.televisions)
+cor_b.televisions
+```
+
+## Доверительные эллипсоиды
+
+```{r}
+plot(ellipse(cov_b.televisions, centre = model.televisions$coefficients[2:3], level=0.95, npoints = 100), type = "l")
+```
+
+# Анализ суицидов
+
+## Загрузка данных
+
+```{r}
+PRESTIGE <- read_excel("PRESTIGE.xls")
+names(PRESTIGE)[1] <- "PROF"
+```
+
+## Смотрим данные
+
+```{r}
+PRESTIGE |> head(5) |> print_df()
+```
+
+- **PROF** --- страна, качественный признак;
+
+- **PRESTIGE** --- рейтинг профессионального престижа NORC, количественный дискретный признак;
+
+- **SUICIDE** --- уровень самоубийств среди мужчин (среди мужчин в возрасте 20-64 лет), количественный непрерывный признак;
+
+- **INCOME** --- доход, количественный непрерывный признак;
+
+- **SCHOOL** --- среднее количество завершенных лет обучения, количественный дискретный признак.
+
+## Матричный скаттерплот
+
+```{r}
+scatterPlotMatrix(PRESTIGE)
+```
+
+```{r}
+PRESTIGE <- PRESTIGE |> mutate(INCOME = log(INCOME))
+```
+
+```{r}
+scatterPlotMatrix(PRESTIGE)
+```
+
+## Корреляция признаков
+
+```{r}
+PRESTIGE |> select(-PROF) |> pairwise.cor() |> print_df()
+```
+
+## Многомерная регрессия
+
+```{r}
+model.prestige <- lm(SUICIDE ~ PRESTIGE + INCOME + SCHOOL, PRESTIGE)
+model.prestige.beta <- lm.beta(model.prestige)
+summary(model.prestige.beta)
+```
+
+- Положительный коэффициент регресии рейтинга престижа и дохода может говорить о том, что люди с более престижной и высокооплачиваемой профессией подвержены большему стрессу корпоративной работы, а также имеют большую ответственность.
+
+- Отрицательный коэффициент для количества лет обучения может говорить о том, что образованные люди имеют больше перспектив, а также лучше понимают и ценят жизнь.
+
+## Корреляция оценок коэффициентов регресии
+
+```{r}
+n.prestige <- length(PRESTIGE$PROF)
+sigma.prestige <- sum((PRESTIGE$SUICIDE - (model.prestige$coefficients[1] + model.prestige$coefficients[2] * PRESTIGE$PRESTIGE + model.prestige$coefficients[3] * PRESTIGE$INCOME + model.prestige$coefficients[4] * PRESTIGE$SCHOOL)) ** 2) / (n.prestige - 4)
+covMatrix.prestige <- PRESTIGE |> select(-PROF, -SUICIDE) |> cov()
+cov_b.prestige <- sigma.prestige / n.prestige * solve(covMatrix.prestige)
+cor_b.prestige <- cov2cor(cov_b.prestige)
+cor_b.prestige
+```
+
+## Доверительные эллипсоиды
+
+```{r}
+plot(ellipse(cov_b.prestige[2:3, 2:3], centre = model.prestige$coefficients[3:4], level=0.95, npoints = 100), type = "l")
+```
+
+```{r}
+plot(ellipse(cov_b.prestige[1:2, 1:2], centre = model.prestige$coefficients[2:3], level=0.95, npoints = 100), type = "l")
+```
+
+```{r}
+plot(ellipse(cov_b.prestige[c(1, 3), c(1, 3)], centre = model.prestige$coefficients[c(2, 4)], level=0.95, npoints = 100), type = "l")
+```
+
+## Смотрим на наиболее влияющие признаки и считаем меру мультиколлинеарности
+
+```{r}
+ols_vif_tol(model.prestige)
+```
+
+Престиж --- наиболее вероятный вариант на исключение из модели, судя по метрике.
+
+```{r}
+ols_correlations(model.prestige)
+```
+
+Престиж имеет наименьшее влияние на зависимую переменную при исключения влияния остальных признаков, а количество лет обучения --- наибольшее.
+
+## Исключаем доход
+
+```{r}
+model.prestige.without <- lm(SUICIDE ~ SCHOOL + PRESTIGE, PRESTIGE)
+summary(model.prestige.without)
+```
+
+## Исключаем престиж
+
+```{r}
+model.prestige.without <- lm(SUICIDE ~INCOME + SCHOOL, PRESTIGE)
+model.prestige.without.beta <- lm.beta(model.prestige.without)
+summary(model.prestige.without.beta)
+summary(model.prestige.without)
+```
+
+Коэффициенты стали более значимы в обоих случаях, однако уменьшение Rsquare меньше в случае исключения престижа, поэтому мы рекомендуем именно эту --- последнюю --- модель.
+
+```{r}
+model.prestige.without <- lm(SUICIDE ~SCHOOL, PRESTIGE)
+model.prestige.without.beta <- lm.beta(model.prestige.without)
+summary(model.prestige.without.beta)
+```
