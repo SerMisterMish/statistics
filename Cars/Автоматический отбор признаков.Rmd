@@ -1,0 +1,222 @@
+---
+title: "olsrr_ex"
+output: html_document
+date: "2024-03-12"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(dplyr)
+library(scatterPlotMatrix)
+library(ggplot2)
+library(tidyr)
+library(GGally)
+library(car)
+library(kableExtra)
+library(geomtextpath)
+library(moments)
+library(nortest)
+library(corrplot)
+library(ppcor)
+library(olsrr)
+
+my_fn <- function(data, mapping, ...){
+  p <- ggplot(data = data, mapping = mapping) + 
+    geom_point() + 
+    geom_smooth(method=loess, fill="red", color="red", ...) +
+    geom_smooth(method=lm, fill="blue", color="blue", ...)
+  p
+}
+
+getmode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+print_df <- function(df)
+{
+  df |>
+    kable(format = "html") |>
+    kable_styling() |>
+    kableExtra::scroll_box(width = "100%", height = "100%")
+}
+
+```
+
+# Данные
+
+Набор данных, содержащий данные о выживаемости пациентов, перенесших операцию на печени.
+
+```{r}
+surgical |> head(5) |> print_df()
+```
+
+```{r}
+nrow(surgical)
+```
+
+1. ***bcs*** --- показатель свертываемости крови, ***количественный непрерывный признак***. 
+2. ***pindex*** --- прогностический индекс (для оценки тяжести течения болезни), ***количественный непрерывный признак***. 
+3. ***enzyme_test*** --- результат теста на ферменты, ***количественный непрерывный признак***. 
+4. ***liver_test*** --- оценка функции печени, **количественный непрерывный признак**.
+5. ***age*** --- возраст пациента, **количественный непрерывный признак**.
+6. ***gender*** --- пол пациента (0 - мужчина, 1 - женщина), **качественный признак**.
+7. ***alc_mod*** --- тест на употребление алкоголя (0 - нет, 1 - умеренное), **качественный признак**.
+8. ***alc_heavy	*** --- тест на употребление алкоголя (0 - нет, 1 - сильное), **качественный признак**.
+9. ***y*** --- продолжительность жизни, ***количественный непрерывный признак***. 
+
+
+```{r}
+summary(surgical)
+```
+
+```{r, warning=FALSE, include=FALSE}
+print(paste("Мода:", getmode(na.omit(surgical$bcs)), ", частота:", length(which(surgical$bcs == getmode(na.omit(surgical$bcs))))))
+print(paste("Мода:", getmode(na.omit(surgical$pindex)), ", частота:", length(which(surgical$pindex == getmode(na.omit(surgical$pindex))))))
+print(paste("Мода:", getmode(na.omit(surgical$enzyme_test)), ", частота:", length(which(surgical$enzyme_test == getmode(na.omit(surgical$enzyme_test))))))
+print(paste("Мода:", getmode(na.omit(surgical$liver_test)), ", частота:", length(which(surgical$liver_test == getmode(na.omit(surgical$liver_test))))))
+print(paste("Мода:", getmode(na.omit(surgical$age)), ", частота:", length(which(surgical$age == getmode(na.omit(surgical$age))))))
+print(paste("Мода:", getmode(na.omit(surgical$y)), ", частота:", length(which(surgical$y == getmode(na.omit(surgical$y))))))
+
+```
+
+
+```{r, message=FALSE, message=FALSE, warning=FALSE}
+surgical |>
+  #dplyr::select(-gender, -alc_mod, -alc_heavy) |>
+      ggpairs()
+```
+
+
+
+# Пошаговый отбор
+
+Пошаговая регрессия — это метод подбора регрессионных моделей, который включает в себя итеративный выбор независимых переменных для использования в модели. Этого можно достичь путем прямого отбора, обратного исключения или комбинации обоих методов. Подход прямого отбора начинается без переменных и постепенно добавляет каждую новую переменную, проверяя статистическую значимость, а метод обратного исключения начинается со всеми переменными, а затем удаляет наименее статистически значимые переменные по одной.
+
+## Модель
+
+Построим модель
+```{r}
+model <- lm(y ~ ., data = surgical)
+summary(model)
+```
+
+Рассмотрим теперь пошаговые регрессии по значению p-value
+
+### Forward: Прямой отбор (p-value)
+
+```{r}
+ols_step_forward_p(model)
+```
+```{r, warning=FALSE}
+k1 <- ols_step_forward_p(model)
+plot(k1)
+```
+
+### Backward: Обратное исключение (p-value)
+```{r}
+ols_step_backward_p(model)
+```
+
+```{r, warning=FALSE}
+k2 <- ols_step_backward_p(model)
+plot(k2)
+```
+
+Заметим, что переменные, не вошедшие в модель, в обоих случаях одни и те же: **age**, **gender**, **alc_mod**. Результат получается одинаковым.
+
+### Критерии отбора
+
+Критериями выбора переменных могут быть следующие (ols_step_forward_):
+
+    Значение р-value (p)
+    Информационный критерий Akaike (aic)
+    Байесовский критерий Шварца (sbc)
+    Байесовский критерий Саввы (sbic)
+    R2 (r2)
+    скорректированный R2 (adj_r2)
+
+
+### Принудительное включение/исключение переменные
+
+Посмотрим, что как изменятся значения, если мы принудительно добавим переменные **age**, **alc_mod** в прямой отбор (модель останется без переменной **gender**)
+
+```{r}
+ols_step_forward_p(model, include = c("age", "alc_mod"))
+# ols_step_forward_p(model, include = c(5, 7)) --- можно по индексу
+```
+```{r, warning=FALSE}
+k3 <- ols_step_forward_p(model, include = c("age", "alc_mod"))
+plot(k3)
+```
+
+## Прямой отбор (Adj. R2)
+
+Рассмотрим теперь прямой отбор по скорректированному R2.
+
+```{r}
+ols_step_forward_adj_r2(model)
+```
+
+### Визуализация
+
+Посмотрим на графике, как меняются критерии выбора переменной на каждом этапе процесса выбора вместе с выбранной переменной.
+```{r}
+k <- ols_step_forward_adj_r2(model)
+plot(k)
+```
+
+    
+### Подробные выводы
+
+Все методы пошагового выбора отображают стандартный вывод, который включает в себя:
+
+    Сводку выбора параметров
+    Резюме готовой модели
+    Дисперсионный анализ ANOVA
+    Оценки параметров
+    
+Если мы хотим получить более подробные выходные данные регрессии на каждом этапе выбора/исключения переменной, установим параметр **details = TRUE**. 
+
+```{r}
+ols_step_forward_adj_r2(model, details = TRUE)
+```
+
+Теперь, дополнительно, на каждом этапе будет отображаться следующая информация:
+
+    Номер шага
+    Переменная, которая выбрана/исключена
+    Модель на этом шаге
+    Критерии на этом шаге
+    
+Чтобы просмотреть ход процедуры выбора переменной, можно установить параметр **progress = TRUE**. Он будет дополнительно отображать выбранную/исключенную переменную на каждом этапе до тех пор, пока не останется переменных-кандидатов.
+
+```{r}
+ols_step_forward_adj_r2(model, progress = TRUE)
+```
+
+## Иерархический выбор
+
+При использовании значений p-value в качестве критерия выбора/исключения переменных мы можем включить иерархический выбор. В этом методе поиск наиболее значимой переменной ограничивается следующей доступной переменной. Поэтапный выбор заканчивается, как только обнаруживается переменная, которая не соответствует порогу выбора (в данном случае **liver_test**)
+
+```{r}
+m <- lm(y ~ bcs + alc_heavy + pindex + enzyme_test + liver_test + age + gender + alc_mod, data = surgical)
+ols_step_forward_p(m, 0.1, hierarchical = TRUE)
+```
+
+## stepAIC и ols_step_forward_aic
+
+Сравним результаты, которые получены с помощью двух функций для пошаговой регрессии, пока не будет достигнута оптимальная регрессия по критерию Акаике.
+
+```{r}
+ols_step_forward_aic(model)
+```
+
+```{r}
+step<- stepAIC(model)
+summary(step)
+```
+
+Оставшиеся переменные совпадают
+
